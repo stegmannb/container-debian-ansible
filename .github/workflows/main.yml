@@ -1,0 +1,96 @@
+---
+name: Create and publish a container image
+
+"on":
+  pull_request:
+  push:
+    branches:
+      - "main"
+  schedule:
+    - cron: "0 16 * * 5"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  AUTHORS: Bastian Stegmann
+  TAGS:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        versiontag:
+          - buster
+          - bullseye
+          - bookworm
+          - latest
+
+    steps:
+      # - name: Dump env
+      #   run: echo "$TAGS"
+
+      # - name: Dump context
+      #   run: echo "${{ env.TAGS }}"
+
+      - name: Create image tags
+        run: |
+          echo "TAGS=${{ env.TAGS }} ${{ github.ref_name }}-${{ matrix.versiontag }} ${{ github.sha }}-${{ matrix.versiontag }} ${{ github.run_id }}-${{ matrix.versiontag }}" >> $GITHUB_ENV
+
+      - name: Add the base tag
+        run: |
+          echo "TAGS=${{ env.TAGS }} ${{ matrix.versiontag }}" >> $GITHUB_ENV
+        if: ${{ github.ref_name == 'main' }}
+
+      - name: Register current timestamp
+        run: |
+          echo "NOW=$(date --iso-8601=seconds)" >> $GITHUB_ENV
+
+      # - name: Dump env
+      #   run: echo "$TAGS"
+
+      # - name: Dump context
+      #   run: echo "${{ env.TAGS }}"
+
+      - name: Log in to ghcr.io
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Buildah Action
+        uses: redhat-actions/buildah-build@v2
+        with:
+          image: ${{ env.IMAGE_NAME }}
+          containerfiles: |
+            ./Containerfile
+          build-args: |
+            versiontag=${{ matrix.versiontag }}
+          tags: ${{ env.TAGS }}
+          labels: |
+            org.opencontainers.image.source="${{ github.server_url }}/${{ github.repository}}"
+            org.opencontainers.image.created="${NOW}"
+            org.opencontainers.image.authors="$AUTHORS"
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title="${{ github.repository}}"
+            org.opencontainers.image.url="${{ github.server_url }}/${{ github.repository}}"
+            org.opencontainers.image.version=${{ github.ref_name }}
+          # org.opencontainers.image.description=
+
+      - name: Push to ghcr.io
+        id: push
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ env.IMAGE_NAME }}
+          registry: ${{ env.REGISTRY }}
+          tags: ${{ env.TAGS }}
